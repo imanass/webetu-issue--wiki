@@ -1,0 +1,54 @@
+name: Publish GitHub Wiki
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Home*.md'
+      - 'Method-*.md'
+      - 'Report-Result*.md'
+      - '_Sidebar.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source pages
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Publish pages to the GitHub Wiki
+        env:
+          WIKI_DEPLOY_TOKEN: ${{ secrets.WIKI_DEPLOY_TOKEN }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$WIKI_DEPLOY_TOKEN" ]]; then
+            echo "::error::Add the WIKI_DEPLOY_TOKEN repository secret. See docs/wiki-publishing.md."
+            exit 1
+          fi
+
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$WIKI_DEPLOY_TOKEN" | base64 -w0)"
+          wiki_dir="$(mktemp -d)"
+          git -c http.extraheader="$auth_header" clone "https://github.com/${SOURCE_REPOSITORY}.wiki.git" "$wiki_dir"
+          cp ./*.md "$wiki_dir/"
+
+          git -C "$wiki_dir" config user.name "github-actions[bot]"
+          git -C "$wiki_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$wiki_dir" add --all
+
+          if git -C "$wiki_dir" diff --cached --quiet; then
+            echo "Wiki pages are already up to date."
+            exit 0
+          fi
+
+          git -C "$wiki_dir" commit -m "Publish wiki pages from ${SOURCE_REPOSITORY}@${GITHUB_SHA}"
+          git -C "$wiki_dir" -c http.extraheader="$auth_header" push
